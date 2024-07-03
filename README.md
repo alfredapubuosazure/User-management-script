@@ -1,7 +1,6 @@
 <<<<<<< HEAD
 # User-management-script
 =======
-Here's a sample README.md file for the `create_users.sh` script:
 
 # User Management Script
 
@@ -70,4 +69,4 @@ This script was developed as part of the HNG Internship program. To learn more a
 - [HNG Internship](https://hng.tech/internship)
 - [HNG Hire](https://hng.tech/hire)
 - [HNG Premium](https://hng.tech/premium)
- b5ccae7 (Add user management script and README)
+ b5ccae7
