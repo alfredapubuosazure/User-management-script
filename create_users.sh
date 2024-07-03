@@ -1,68 +1,79 @@
 #!/bin/bash
 
-# Function to log actions
-log_action() {
-    local message="$1"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" >> /var/log/user_management.log
+# Check if the input file exists
+if [ ! -f "$1" ]; then
+    echo "Error: Input file not found."
+    exit 1
+fi
+
+# Ensure log and secure directories are initialized once
+LOG_FILE="/var/log/user_management.log"
+PASSWORD_FILE="/var/secure/user_passwords.csv"
+
+# Initialize log file
+if [ ! -f "$LOG_FILE" ]; then
+    sudo touch "$LOG_FILE"
+    sudo chown root:root "$LOG_FILE"
+fi
+
+# Initialize password file
+if [ ! -f "$PASSWORD_FILE" ]; then
+    sudo mkdir -p /var/secure
+    sudo touch "$PASSWORD_FILE"
+    sudo chown root:root "$PASSWORD_FILE"
+    sudo chmod 600 "$PASSWORD_FILE"
+fi
+
+# Redirect stdout and stderr to the log file
+exec > >(sudo tee -a "$LOG_FILE") 2>&1
+
+# Function to check if user exists
+user_exists() {
+    id "$1" &>/dev/null
 }
 
-# Check if script is run with the correct argument
-if [ -z "$1" ]; then
-    echo "Usage: $0 <name-of-text-file>"
-    exit 1
-fi
+# Read each line from the input file
+while IFS=';' read -r raw_username raw_groups; do
+    # Trim whitespace
+    username=$(echo "$raw_username" | xargs)
+    groups=$(echo "$raw_groups" | xargs)
 
-# Check if the text file exists
-if [ ! -f "$1" ]; then
-    echo "Error: File '$1' does not exist."
-    exit 1
-fi
+    # Check if the user already exists
+    if user_exists "$username"; then
+        echo "User $username already exists."
+        continue
+    fi
 
-# Create the log file if it doesn't exist
-if [ ! -f "/var/log/user_management.log" ]; then
-    touch /var/log/user_management.log
-    chmod 640 /var/log/user_management.log
-    chown root:adm /var/log/user_management.log
-fi
+    # Create user with home directory
+    sudo useradd -m "$username"
 
-# Create the secure password file if it doesn't exist
-if [ ! -f "/var/secure/user_passwords.txt" ]; then
-    mkdir -p /var/secure
-    touch /var/secure/user_passwords.txt
-    chmod 600 /var/secure/user_passwords.txt
-    chown root:root /var/secure/user_passwords.txt
-fi
+    # Create home directory if not exists
+    if [ ! -d "/home/$username" ]; then
+        sudo mkdir -p "/home/$username"
+        sudo chown "$username:$username" "/home/$username"
+    fi
 
-# Iterate through the text file and create users and groups
-while IFS=';' read -r username groups; do
-    # Trim leading/trailing whitespace
-    username=$(echo "$username" | xargs)
-    groups=$(echo "$groups" | xargs)
-
-    # Create the user's personal group
-    groupadd "$username"
-
-    # Create the user with the personal group as the primary group
-    useradd -m -g "$username" "$username"
-
-    # Add the user to the specified groups
-    for group in $(echo "$groups" | tr ',' ' '); do
-        usermod -a -G "$group" "$username"
-    done
-
-    # Generate a random password
+    # Generate random password
     password=$(openssl rand -base64 12)
 
-    # Set the user's password
-    echo "$username:$password" | chpasswd
+    # Set password for user
+    echo "$username:$password" | sudo chpasswd
 
-    # Log the user creation
-    log_action "Created user '$username' with password '$password' and groups '$groups'"
+    # Log actions
+    echo "User $username created. Password: $password"
 
-    # Store the password in the secure file
-    echo "$username,$password" >> /var/secure/user_passwords.txt
+    # Store passwords securely
+    echo "$username,$password" | sudo tee -a "$PASSWORD_FILE"
+
+    # Add user to groups
+    if [ -n "$groups" ]; then
+        IFS=',' read -ra group_array <<< "$groups"
+        for group in "${group_array[@]}"; do
+            group=$(echo "$group" | xargs)
+            sudo groupadd -f "$group"
+            sudo usermod -aG "$group" "$username"
+        done
+    fi
+
 done < "$1"
-
-echo "User creation completed. Logs available at /var/log/user_management.log"
-echo "Passwords stored in /var/secure/user_passwords.txt"
 
